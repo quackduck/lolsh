@@ -1,17 +1,16 @@
 package main
 
 import (
-	"io"
-	"strings"
-	"time"
-	//"bufio"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/fatih/color"
+	//"github.com/kris-nova/lolgopher"
 	"github.com/peterh/liner"
-	"github.com/vbatts/gogololcat/lol"
 )
 
 var (
@@ -131,12 +130,6 @@ func run(command []string) {
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	lolWriter := lol.Writer{
-		Writer:    os.Stdout,
-		Colors:    lol.DetectTermColor(),
-		Spread:    3.0,
-		Frequency: 0.1,
-	}
 	r, err := cmd.StdoutPipe()
 	if err != nil {
 		handleErr(err)
@@ -147,11 +140,9 @@ func run(command []string) {
 		handleErr(err)
 		return
 	}
-	_, err = io.Copy(&lolWriter, r)
-	if err != nil {
-		handleErr(err)
-		return
-	}
+	rand.Seed(time.Now().UTC().UnixNano())
+	seed := int(rand.Int31n(256))
+	runLol(seed, os.Stdout, r)
 	err = cmd.Wait()
 	if err != nil {
 		handleErr(err)
