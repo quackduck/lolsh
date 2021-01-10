@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"io"
 	"strings"
 	"time"
 	//"bufio"
@@ -10,12 +10,15 @@ import (
 	"os/exec"
 
 	"github.com/fatih/color"
-	//"github.com/peterh/liner"
+	"github.com/peterh/liner"
+	"github.com/vbatts/gogololcat/lol"
 )
 
 var (
-	version = "dev"
-	helpMsg = ``
+	version    = "dev"
+	helpMsg    = ``
+	homeDir    = os.Getenv("HOME")
+	configPath = homeDir + "/.config/lolsh"
 )
 
 func main() {
@@ -36,20 +39,39 @@ func main() {
 }
 
 func startShell() {
-	err := os.Setenv("SHELL", "lolsh")
+	var err error
+	err = os.Setenv("SHELL", "lolsh")
 	if err != nil {
 		handleErr(err)
 		return
 	}
-	//reader := bufio.NewReader(os.Stdin)
-	//for {
-	//	input, _, err := reader.ReadRune()
-	//	if err != nil && err == io.EOF {
-	//		break
-	//	}
-	//	output = append(output, input)
-	//}
-	reader := bufio.NewReader(os.Stdin)
+	line := liner.NewLiner()
+	defer line.Close()
+	line.SetCtrlCAborts(true)
+	line.SetTabCompletionStyle(liner.TabPrints)
+
+	if err = os.MkdirAll(configPath, 0775); err != nil {
+		handleErr(err)
+		return
+	}
+	histFile, err := os.OpenFile(configPath+"/history.txt", os.O_RDWR|os.O_CREATE, 0664)
+	if err != nil {
+		handleErr(err)
+		return
+	}
+	_, err = line.ReadHistory(histFile)
+	if err != nil {
+		handleErr(err)
+		return
+	}
+	defer func() {
+		err = histFile.Close()
+		if err != nil {
+			handleErr(err)
+			return
+		}
+	}()
+
 	for {
 		name, err := os.Hostname()
 		if err != nil {
@@ -59,67 +81,82 @@ func startShell() {
 		if err != nil {
 			handleErr(err)
 		}
-		fmt.Print(os.Getenv("USER") + "@" + name + " [" + cwd + "] $ ")
-
-		input, err := reader.ReadString('\n')
-		if err != nil {
+		cwdWithoutHomeDirPath := strings.TrimPrefix(cwd, homeDir)
+		if cwdWithoutHomeDirPath != cwd { // It does have the home dir path at the front
+			cwd = "~" + cwdWithoutHomeDirPath
+		}
+		if commandStr, err := line.Prompt(os.Getenv("USER") + "@" + name + " [" + cwd + "] $ "); err == nil {
+			command := strings.Split(commandStr, " ")
+			line.AppendHistory(commandStr)
+			run(command)
+			_, err := line.WriteHistory(histFile)
+			if err != nil {
+				handleErr(err)
+				return
+			}
+		} else if err == liner.ErrPromptAborted {
+			continue
+		} else {
 			handleErr(err)
 		}
-		input = strings.TrimSuffix(input, "\n")
-		command := strings.Split(input, " ")
-		run(command)
 	}
-
 }
 
 func run(command []string) {
-	// run it with the users shell
 	switch command[0] {
 	case "cd":
 		if len(command) == 1 {
-			cd(os.Getenv("HOME"))
+			cd(homeDir)
 			return
 		}
+		if len(command) > 2 {
+			handleErrStr("too many arguments to cd")
+			return
+		}
+		command[1] = strings.ReplaceAll(command[1], "~", homeDir)
 		cd(command[1])
+		return
 	case "exit":
 		os.Exit(0)
 	case "time":
 		t := time.Now()
 		defer func() {
-			fmt.Println(time.Since(t))
+			newt := time.Since(t)
+			fmt.Println(newt, "=", float64(newt.Nanoseconds())/1e6)
 		}()
 		run(command[1:])
 		return
 	}
 	var err error
 	cmd := exec.Command(command[0], command[1:]...)
-	lol := exec.Command("lolcat")
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	lol.Stdin, err = cmd.StdoutPipe()
+	lolWriter := lol.Writer{
+		Writer:    os.Stdout,
+		Colors:    lol.DetectTermColor(),
+		Spread:    3.0,
+		Frequency: 0.1,
+	}
+	r, err := cmd.StdoutPipe()
 	if err != nil {
 		handleErr(err)
 		return
 	}
-	lol.Stdout = os.Stdout
-	err = lol.Start()
+	err = cmd.Start()
 	if err != nil {
 		handleErr(err)
 		return
 	}
-	err = cmd.Run()
+	_, err = io.Copy(&lolWriter, r)
 	if err != nil {
 		handleErr(err)
 		return
 	}
-	err = lol.Wait()
+	err = cmd.Wait()
 	if err != nil {
 		handleErr(err)
 		return
 	}
-	//cmd.Stderr = nil
-	//cmd.Stdout = nil
-	//cmd.Stdin = nil
 }
 
 func argsHaveOption(long string, short string) (hasOption bool, foundAt int) {
@@ -148,34 +185,3 @@ func cd(path string) {
 		handleErr(err)
 	}
 }
-
-//cmd := exec.Command(os.Getenv("SHELL"), "-c", command+" | lolcat") //nolint //"Subprocess launched with function call as argument or cmd arguments"
-//l := Light{
-//	Writer: os.Stdout, // to write to
-//	Seed:   rand.Int63n(256),
-//}
-//io.Pipe()
-//io.Copy(&l, )
-//stdout, err := cmd.StdoutPipe()
-//if err != nil {
-//	handleErr(err)
-//}
-//stderr, err := cmd.StderrPipe()
-//if err != nil {
-//	handleErr(err)
-//}
-//err = cmd.Start()
-//if err != nil {
-//	handleErr(err)
-//}
-//
-//stdo, g := ioutil.ReadAll(stdout)
-//stde, f := ioutil.ReadAll(stderr)
-//
-//d := cmd.Wait()
-
-//fmt.Println(out.String())
-//err := l.Paint()
-//if err != nil {
-//	handleErr(err)
-//}
