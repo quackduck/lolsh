@@ -3,9 +3,11 @@ module lolsh
 go 1.15
 
 require (
+	github.com/arsham/rainbow v1.1.1
 	github.com/fatih/color v1.10.0
-	github.com/kris-nova/lolgopher v0.0.0-20180921204813-313b3abb0d9b // indirect
-	github.com/mattn/go-runewidth v0.0.9 // indirect
+	github.com/kris-nova/lolgopher v0.0.0-20210112022122-73f0047e8b65
+	github.com/mattn/go-runewidth v0.0.10 // indirect
 	github.com/peterh/liner v1.2.1
-	golang.org/x/sys v0.0.0-20210110051926-789bb1bd4061 // indirect
+	github.com/rivo/uniseg v0.2.0 // indirect
+	golang.org/x/sys v0.0.0-20210112091331-59c308dcf3cc // indirect
 )
