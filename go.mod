@@ -9,5 +9,5 @@ require (
 	github.com/mattn/go-runewidth v0.0.10 // indirect
 	github.com/peterh/liner v1.2.1
 	github.com/rivo/uniseg v0.2.0 // indirect
-	golang.org/x/sys v0.0.0-20210112091331-59c308dcf3cc // indirect
+	golang.org/x/sys v0.0.0-20210113112037-3196cb8d8e45 // indirect
 )

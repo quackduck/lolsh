@@ -1,50 +1,53 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
-	"io"
-	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/fatih/color"
 	//lol "github.com/kris-nova/lolgopher"
-	"github.com/arsham/rainbow/rainbow"
+	//"github.com/arsham/rainbow/rainbow"
 	"github.com/peterh/liner"
 )
 
 var (
-	version    = "dev"
-	helpMsg    = ``
+	version = "dev"
+	helpMsg = `lolsh - A shell with all output lolcat-ed
+Usage: lolsh [-v/--version | -v/--help]`
 	homeDir    = os.Getenv("HOME")
 	configPath = homeDir + "/.config/lolsh"
 	exit       = false
 	ctrlCChan  = make(chan os.Signal)
+	line       *liner.State
+	histFile   *os.File
 )
 
 func main() {
-	if len(os.Args) > 1 {
-		handleErrStr("too many arguments")
-		fmt.Println(helpMsg)
-		return
-	}
 	if hasOption, _ := argsHaveOption("help", "h"); hasOption {
 		fmt.Println(helpMsg)
 		return
 	}
 	if hasOption, _ := argsHaveOption("version", "v"); hasOption {
-		fmt.Println("lolsh " + version)
+		fmt.Println("lolsh " + version + " lol")
+		return
+	}
+
+	if len(os.Args) > 1 {
+		handleErrStr("too many arguments lol")
+		fmt.Println(helpMsg)
 		return
 	}
 	startShell()
 }
 
 func startShell() {
-	signal.Notify(ctrlCChan, os.Interrupt, syscall.SIGTERM) // because of this, lolsh itself won't get any signals but will just pass them on to executed commands.
+	signal.Notify(ctrlCChan, os.Interrupt) // because of this, lolsh itself won't get any signals but will just pass them on to executed commands.
 	go func() {
 		<-ctrlCChan
 		fmt.Println("you hit ^C lol")
@@ -55,16 +58,14 @@ func startShell() {
 		handleErr(err)
 		return
 	}
-	line := liner.NewLiner()
+	line = liner.NewLiner()
 	defer line.Close()
-	line.SetCtrlCAborts(true)
-	line.SetTabCompletionStyle(liner.TabPrints)
-
+	//line.SetTabCompletionStyle(liner.TabPrints)
 	if err = os.MkdirAll(configPath, 0775); err != nil {
 		handleErr(err)
 		return
 	}
-	histFile, err := os.OpenFile(configPath+"/history.txt", os.O_RDWR|os.O_CREATE, 0664)
+	histFile, err = os.OpenFile(configPath+"/history.txt", os.O_RDWR|os.O_CREATE, 0664)
 	if err != nil {
 		handleErr(err)
 		return
@@ -95,12 +96,13 @@ func startShell() {
 		if strings.HasPrefix(cwd, homeDir) { // It does have the home dir path at the front
 			cwd = "~" + strings.TrimPrefix(cwd, homeDir)
 		}
-		if commandStr, err := line.Prompt(os.Getenv("USER") + "@" + name + " [" + cwd + "] LOL $ "); err == nil {
+		if commandStr, err := line.Prompt(os.Getenv("USER") + "@" + name + " [" + cwd + "] lol $ "); err == nil {
 			if strings.TrimSpace(commandStr) == "" {
 				continue
 			}
 			command := strings.Fields(commandStr)
 			line.AppendHistory(commandStr)
+			//line.Close()
 			run(command, true)
 		} else if err == liner.ErrPromptAborted {
 			continue
@@ -108,15 +110,31 @@ func startShell() {
 			handleErr(err)
 		}
 	}
-	exitJobs(line, histFile)
+	exitJobs()
 }
 
 func run(command []string, withLol bool) {
+	commandStr := strings.Join(command, " ")
+	if strings.Contains(commandStr, ";") {
+		for _, chunkCommand := range strings.Split(commandStr, ";") {
+			run(strings.Fields(chunkCommand), withLol)
+		}
+		return
+	}
+	if strings.Contains(commandStr, "#") {
+		if stuffBefore := strings.Split(commandStr[:strings.Index(commandStr, "#")], " "); len(stuffBefore) > 1 {
+			run(stuffBefore, withLol)
+		}
+		return
+	}
 	for i := range command {
 		if strings.HasPrefix(command[i], "$") { // is env variable?
 			command[i] = os.Getenv(strings.TrimPrefix(command[i], "$"))
 		}
+		command[i] = strings.Replace(command[i], "~", homeDir, 1) // 1 replacement per word
 	}
+
+	// Builtins
 	switch command[0] {
 	case "cd":
 		if len(command) > 2 {
@@ -127,7 +145,6 @@ func run(command []string, withLol bool) {
 			cd(homeDir)
 			return
 		}
-		command[1] = strings.ReplaceAll(command[1], "~", homeDir)
 		cd(command[1])
 		return
 	case "exit":
@@ -145,7 +162,7 @@ func run(command []string, withLol bool) {
 		t := time.Now()
 		defer func() {
 			newt := time.Since(t)
-			fmt.Println(newt, "=", float64(newt.Nanoseconds())/1e6)
+			fmt.Println("Command took", newt.Round(time.Millisecond/100), "lol")
 		}()
 		run(command[1:], withLol)
 		return
@@ -166,14 +183,33 @@ func run(command []string, withLol bool) {
 		}
 		run(command[1:], false)
 		return
+	case "history":
+		if len(command) < 1 {
+			handleErrStr("history: invalid number of arguments lol")
+			return
+		}
+		buf := new(bytes.Buffer)
+		_, err := line.WriteHistory(buf)
+		if err != nil {
+			handleErr(err)
+			return
+		}
+		history := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		for i, entry := range history {
+			fmt.Println(strconv.Itoa(i+1)+":", entry)
+		}
+		//run([]string{"cat", configPath + "/history.txt"}, withLol)
+		return
 	}
 	cmd := exec.Command(command[0], command[1:]...)
+	lolcatCmd := exec.Command("lolcat")
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
-	var r io.ReadCloser
+
 	var err error
 	if withLol {
-		r, err = cmd.StdoutPipe()
+		lolcatCmd.Stdin, err = cmd.StdoutPipe()
+		lolcatCmd.Stdout = os.Stdout
 	} else {
 		cmd.Stdout = os.Stdout
 	}
@@ -187,23 +223,47 @@ func run(command []string, withLol bool) {
 		return
 	}
 	if withLol {
-		l := rainbow.Light{
-			Writer: os.Stdout, // to write to
-			Seed:   rand.Int63n(256),
-		}
-		if _, err = io.Copy(&l, r); err != nil {
+		err = lolcatCmd.Start()
+		if err != nil {
 			handleErr(err)
 			return
 		}
+		// comments are the ones which do not work with vim/nano and other editors
+
+		//rand.Seed(time.Now().UTC().UnixNano())
+		//seed := int(rand.Int31n(256))
+		//runLol(seed, os.Stdout, r)
+
+		//l := rainbow.Light{
+		//	Writer: os.Stdout, // to write to
+		//	Seed:   rand.Int63n(256),
+		//}
+		//if _, err = io.Copy(&l, r); err != nil {
+		//	handleErr(err)
+		//	return
+		//}
+
+		//if _, err = io.Copy(lol.NewLolWriter(), r); err != nil {
+		//	handleErr(err)
+		//	return
+		//}
+
 	}
 	err = cmd.Wait()
 	if err != nil {
 		handleErr(err)
 		return
 	}
+	if withLol {
+		err = lolcatCmd.Wait()
+		if err != nil {
+			handleErr(err)
+			return
+		}
+	}
 }
 
-func exitJobs(line *liner.State, histFile *os.File) {
+func exitJobs() {
 	_, err := line.WriteHistory(histFile)
 	if err != nil {
 		handleErr(err)
