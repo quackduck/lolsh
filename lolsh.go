@@ -127,6 +127,9 @@ func run(commandStr string, withLol bool) {
 	if commandStr == "" {
 		return
 	}
+	for _, subCommand := range strings.Split(commandStr, "\n") {
+		run(subCommand, withLol)
+	}
 	if strings.Contains(commandStr, ";") {
 		for _, chunkCommand := range strings.Split(commandStr, ";") {
 			run(chunkCommand, withLol)
