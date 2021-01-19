@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -13,7 +14,8 @@ import (
 	"github.com/fatih/color"
 	//lol "github.com/kris-nova/lolgopher"
 	//"github.com/arsham/rainbow/rainbow"
-	"github.com/peterh/liner"
+	//"github.com/peterh/liner"
+	"github.com/candid82/liner"
 )
 
 var (
@@ -52,11 +54,16 @@ func startShell() {
 		<-ctrlCChan
 		fmt.Println("you hit ^C lol")
 	}()
-	var err error
-	err = os.Setenv("SHELL", "lolsh")
+	err := os.Setenv("SHELL", "lolsh")
 	if err != nil {
 		handleErr(err)
 		return
+	}
+	content, _ := ioutil.ReadFile(configPath + "/startup.lolsh")
+	if os.Getenv("lolsh_disable_lol") == "" || os.Getenv("lolsh_disable_lol") == "false" {
+		run(string(content), true)
+	} else {
+		run(string(content), false)
 	}
 	line = liner.NewLiner()
 	defer line.Close()
@@ -100,10 +107,12 @@ func startShell() {
 			if strings.TrimSpace(commandStr) == "" {
 				continue
 			}
-			command := strings.Fields(commandStr)
 			line.AppendHistory(commandStr)
-			//line.Close()
-			run(command, true)
+			if os.Getenv("lolsh_disable_lol") == "" || os.Getenv("lolsh_disable_lol") == "false" {
+				run(commandStr, true)
+			} else {
+				run(commandStr, false)
+			}
 		} else if err == liner.ErrPromptAborted {
 			continue
 		} else {
@@ -113,20 +122,24 @@ func startShell() {
 	exitJobs()
 }
 
-func run(command []string, withLol bool) {
-	commandStr := strings.Join(command, " ")
+func run(commandStr string, withLol bool) {
+	commandStr = strings.TrimSpace(commandStr)
+	if commandStr == "" {
+		return
+	}
 	if strings.Contains(commandStr, ";") {
 		for _, chunkCommand := range strings.Split(commandStr, ";") {
-			run(strings.Fields(chunkCommand), withLol)
+			run(chunkCommand, withLol)
 		}
 		return
 	}
 	if strings.Contains(commandStr, "#") {
-		if stuffBefore := strings.Split(commandStr[:strings.Index(commandStr, "#")], " "); len(stuffBefore) > 1 {
+		if stuffBefore := commandStr[:strings.Index(commandStr, "#")]; len(stuffBefore) > 1 {
 			run(stuffBefore, withLol)
 		}
 		return
 	}
+	command := strings.Fields(commandStr)
 	for i := range command {
 		if strings.HasPrefix(command[i], "$") { // is env variable?
 			command[i] = os.Getenv(strings.TrimPrefix(command[i], "$"))
@@ -164,7 +177,7 @@ func run(command []string, withLol bool) {
 			newt := time.Since(t)
 			fmt.Println("Command took", newt.Round(time.Millisecond/100), "lol")
 		}()
-		run(command[1:], withLol)
+		run(strings.TrimPrefix(commandStr, "time"), withLol)
 		return
 	case "set":
 		if len(command) > 3 || len(command) < 3 {
@@ -181,7 +194,7 @@ func run(command []string, withLol bool) {
 			handleErrStr("nolol: invalid number of arguments lol")
 			return
 		}
-		run(command[1:], false)
+		run(strings.TrimPrefix(commandStr, "time"), false)
 		return
 	case "history":
 		if len(command) < 1 {

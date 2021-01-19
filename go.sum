@@ -1,6 +1,8 @@
 github.com/arsham/rainbow v1.1.1 h1:yoZbngoHRuR1/29+Aa0vRg3re6UB1K5ZCrkmm4XfU6Y=
 github.com/arsham/rainbow v1.1.1/go.mod h1:bYPQeSD5p/bAC58NsISoBikPLm1Y0fGjplVrZLhf9+U=
 github.com/brianvoe/gofakeit/v5 v5.9.1/go.mod h1:/ZENnKqX+XrN8SORLe/fu5lZDIo1tuPncWuRD+eyhSI=
+github.com/candid82/liner v1.4.0 h1:nUhs4pv/cnpnBERwJHmqmgargZTWnPbDJ67HtQcfSTo=
+github.com/candid82/liner v1.4.0/go.mod h1:shD5EWTOYasmaGjMfuaB82N9YxGMIAEoXjQEH6RoGvo=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
