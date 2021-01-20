@@ -124,11 +124,13 @@ func startShell() {
 
 func run(commandStr string, withLol bool) {
 	commandStr = strings.TrimSpace(commandStr)
+	commandStr = strings.ReplaceAll(commandStr, "\r\n", "\n")
 	if commandStr == "" {
 		return
 	}
 	for _, subCommand := range strings.Split(commandStr, "\n") {
 		run(subCommand, withLol)
+		return
 	}
 	if strings.Contains(commandStr, ";") {
 		for _, chunkCommand := range strings.Split(commandStr, ";") {
