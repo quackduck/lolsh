@@ -305,7 +305,7 @@ func runCmdInPtyWithLol(cmd *exec.Cmd) {
 
 		for {
 			select {
-			case <-stop
+			case <-stop:
 				return
 			default:
 				nr, er := src.Read(buf)
