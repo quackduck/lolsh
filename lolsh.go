@@ -296,39 +296,40 @@ func runCmdInPtyWithLol(cmd *exec.Cmd) {
 			panic(err)
 		}
 	}()
-	stop := make(chan bool)
-	go func() { // copies stdin to the pty until a bool is sent through stop
-		//_, _ = io.Copy(ptmx, os.Stdin)
-		src := os.Stdin
-		buf := make([]byte, 1)
-		dst := ptmx
-
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-				nr, er := src.Read(buf)
-				if nr > 0 {
-					nw, ew := dst.Write(buf[0:nr])
-					if ew != nil {
-						err = ew
-						break
-					}
-					if nr != nw {
-						err = io.ErrShortWrite
-						break
-					}
-				}
-				if er != nil {
-					if er != io.EOF {
-						err = er
-					}
-					break
-				}
-			}
-		}
-	}()
+	//stop := make(chan bool)
+	//go func() { // copies stdin to the pty until a bool is sent through stop
+	cmd.Stdin = os.Stdin
+	////_, _ = io.Copy(ptmx, os.Stdin)
+	//src := os.Stdin
+	//buf := make([]byte, 1)
+	//dst := ptmx
+	//
+	//for {
+	//	select {
+	//	case <-stop:
+	//		return
+	//	default:
+	//		nr, er := src.Read(buf)
+	//		if nr > 0 {
+	//			nw, ew := dst.Write(buf[0:nr])
+	//			if ew != nil {
+	//				err = ew
+	//				break
+	//			}
+	//			if nr != nw {
+	//				err = io.ErrShortWrite
+	//				break
+	//			}
+	//		}
+	//		if er != nil {
+	//			if er != io.EOF {
+	//				err = er
+	//			}
+	//			break
+	//		}
+	//	}
+	//}
+	//}()
 	lolcatCmd.Stdin = ptmx
 	lolcatCmd.Stdout = os.Stdout
 	err = lolcatCmd.Start()
@@ -341,7 +342,7 @@ func runCmdInPtyWithLol(cmd *exec.Cmd) {
 		handleErr(err)
 		return
 	}
-	stop <- true
+	//stop <- true
 }
 
 func pluginShell(shell string) {
