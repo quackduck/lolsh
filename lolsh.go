@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/fatih/color"
@@ -16,6 +19,8 @@ import (
 	//"github.com/arsham/rainbow/rainbow"
 	//"github.com/peterh/liner"
 	"github.com/candid82/liner"
+	"github.com/creack/pty"
+	"golang.org/x/term"
 )
 
 var (
@@ -39,6 +44,10 @@ func main() {
 		fmt.Println("lolsh " + version + " lol")
 		return
 	}
+	if hasOption, i := argsHaveOption("shell", "s"); hasOption {
+		pluginShell(os.Args[i+1])
+		return
+	}
 
 	if len(os.Args) > 1 {
 		handleErrStr("too many arguments lol")
@@ -54,16 +63,16 @@ func startShell() {
 		<-ctrlCChan
 		fmt.Println("you hit ^C lol")
 	}()
-	err := os.Setenv("SHELL", "lolsh")
+	err := os.Setenv("SHELL", os.Args[0])
 	if err != nil {
 		handleErr(err)
 		return
 	}
 	content, _ := ioutil.ReadFile(configPath + "/startup.lolsh")
 	if os.Getenv("lolsh_disable_lol") == "" || os.Getenv("lolsh_disable_lol") == "false" {
-		run(string(content), true)
+		parseAndRunCmdStr(string(content), true)
 	} else {
-		run(string(content), false)
+		parseAndRunCmdStr(string(content), false)
 	}
 	line = liner.NewLiner()
 	defer line.Close()
@@ -82,6 +91,7 @@ func startShell() {
 		handleErr(err)
 		return
 	}
+	line.SetMultiLineMode(true)
 	defer func() {
 		err = histFile.Close()
 		if err != nil {
@@ -109,9 +119,9 @@ func startShell() {
 			}
 			line.AppendHistory(commandStr)
 			if os.Getenv("lolsh_disable_lol") == "" || os.Getenv("lolsh_disable_lol") == "false" {
-				run(commandStr, true)
+				parseAndRunCmdStr(commandStr, true)
 			} else {
-				run(commandStr, false)
+				parseAndRunCmdStr(commandStr, false)
 			}
 		} else if err == liner.ErrPromptAborted {
 			continue
@@ -122,36 +132,7 @@ func startShell() {
 	exitJobs()
 }
 
-func run(commandStr string, withLol bool) {
-	commandStr = strings.TrimSpace(commandStr)
-	commandStr = strings.ReplaceAll(commandStr, "\r\n", "\n")
-	if commandStr == "" {
-		return
-	}
-	for _, subCommand := range strings.Split(commandStr, "\n") {
-		run(subCommand, withLol)
-		return
-	}
-	if strings.Contains(commandStr, ";") {
-		for _, chunkCommand := range strings.Split(commandStr, ";") {
-			run(chunkCommand, withLol)
-		}
-		return
-	}
-	if strings.Contains(commandStr, "#") {
-		if stuffBefore := commandStr[:strings.Index(commandStr, "#")]; len(stuffBefore) > 1 {
-			run(stuffBefore, withLol)
-		}
-		return
-	}
-	command := strings.Fields(commandStr)
-	for i := range command {
-		if strings.HasPrefix(command[i], "$") { // is env variable?
-			command[i] = os.Getenv(strings.TrimPrefix(command[i], "$"))
-		}
-		command[i] = strings.Replace(command[i], "~", homeDir, 1) // 1 replacement per word
-	}
-
+func run(command []string, withLol bool) {
 	// Builtins
 	switch command[0] {
 	case "cd":
@@ -182,7 +163,7 @@ func run(commandStr string, withLol bool) {
 			newt := time.Since(t)
 			fmt.Println("Command took", newt.Round(time.Millisecond/100), "lol")
 		}()
-		run(strings.TrimPrefix(commandStr, "time"), withLol)
+		run(command[1:], withLol)
 		return
 	case "set":
 		if len(command) > 3 || len(command) < 3 {
@@ -199,7 +180,7 @@ func run(commandStr string, withLol bool) {
 			handleErrStr("nolol: invalid number of arguments lol")
 			return
 		}
-		run(strings.TrimPrefix(commandStr, "time"), false)
+		run(command[1:], false)
 		return
 	case "history":
 		if len(command) < 1 {
@@ -220,64 +201,194 @@ func run(commandStr string, withLol bool) {
 		return
 	}
 	cmd := exec.Command(command[0], command[1:]...)
-	lolcatCmd := exec.Command("lolcat")
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	var err error
 	if withLol {
-		lolcatCmd.Stdin, err = cmd.StdoutPipe()
-		lolcatCmd.Stdout = os.Stdout
+		runCmdInPtyWithLol(cmd)
+		return
 	} else {
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
-	}
-	if err != nil {
-		handleErr(err)
-		return
-	}
-	err = cmd.Start()
-	if err != nil {
-		handleErr(err)
-		return
-	}
-	if withLol {
-		err = lolcatCmd.Start()
+		err := cmd.Start()
 		if err != nil {
 			handleErr(err)
 			return
 		}
-		// comments are the ones which do not work with vim/nano and other editors
-
-		//rand.Seed(time.Now().UTC().UnixNano())
-		//seed := int(rand.Int31n(256))
-		//runLol(seed, os.Stdout, r)
-
-		//l := rainbow.Light{
-		//	Writer: os.Stdout, // to write to
-		//	Seed:   rand.Int63n(256),
-		//}
-		//if _, err = io.Copy(&l, r); err != nil {
-		//	handleErr(err)
-		//	return
-		//}
-
-		//if _, err = io.Copy(lol.NewLolWriter(), r); err != nil {
-		//	handleErr(err)
-		//	return
-		//}
-
-	}
-	err = cmd.Wait()
-	if err != nil {
-		handleErr(err)
-		return
-	}
-	if withLol {
-		err = lolcatCmd.Wait()
+		err = cmd.Wait()
 		if err != nil {
 			handleErr(err)
 			return
 		}
+	}
+	// Copy stdin to the pty and the pty to stdout.
+	//go func() {
+	//	_, err = io.Copy(ptmx, os.Stdin)
+	//	if err != nil {
+	//		handleErr(err)
+	//	}
+	//}()
+	//_, _ = io.Copy(os.Stdout, ptmx)
+}
+
+func parseAndRunCmdStr(commandStr string, withLol bool) {
+	commandStr = strings.TrimSpace(commandStr)
+	commandStr = strings.ReplaceAll(commandStr, "\r\n", "\n")
+	if commandStr == "" {
+		return
+	}
+	if strings.Contains(commandStr, "\n") {
+		for _, subCommand := range strings.Split(commandStr, "\n") {
+			parseAndRunCmdStr(subCommand, withLol)
+		}
+		return
+	}
+	if strings.Contains(commandStr, ";") {
+		for _, chunkCommand := range strings.Split(commandStr, ";") {
+			parseAndRunCmdStr(chunkCommand, withLol)
+		}
+		return
+	}
+	if strings.Contains(commandStr, "#") {
+		if stuffBefore := commandStr[:strings.Index(commandStr, "#")]; len(stuffBefore) > 1 {
+			parseAndRunCmdStr(stuffBefore, withLol)
+		}
+		return
+	}
+
+	command := strings.Fields(commandStr)
+	for i := range command {
+		if strings.HasPrefix(command[i], "$") { // is env variable?
+			command[i] = os.Getenv(strings.TrimPrefix(command[i], "$"))
+		}
+		command[i] = strings.Replace(command[i], "~", homeDir, 1) // 1 replacement per word
+	}
+	run(command, withLol)
+}
+
+func runCmdInPtyWithLol(cmd *exec.Cmd) {
+	lolcatCmd := exec.Command("lolcat")
+	//	cmd.Stdin = os.Stdin
+	// Start the command with a pty.
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		handleErr(err)
+		return
+	}
+	// Make sure to close the pty at the end.
+	defer func() { _ = ptmx.Close() }() // Best effort.
+	// Handle pty size.
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGWINCH)
+	go func() {
+		for range ch {
+			if err = pty.InheritSize(os.Stdin, ptmx); err != nil {
+				handleErr(err)
+			}
+		}
+	}()
+	ch <- syscall.SIGWINCH // Initial resize.
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		err = term.Restore(int(os.Stdin.Fd()), oldState)
+		if err != nil {
+			panic(err)
+		}
+	}()
+	stop := make(chan bool)
+	go func() { // copies stdin to the pty until a bool is sent through stop
+		//_, _ = io.Copy(ptmx, os.Stdin)
+		src := os.Stdin
+		buf := make([]byte, 1)
+		dst := ptmx
+
+		for {
+			select {
+			case <-stop
+				return
+			default:
+				nr, er := src.Read(buf)
+				if nr > 0 {
+					nw, ew := dst.Write(buf[0:nr])
+					if ew != nil {
+						err = ew
+						break
+					}
+					if nr != nw {
+						err = io.ErrShortWrite
+						break
+					}
+				}
+				if er != nil {
+					if er != io.EOF {
+						err = er
+					}
+					break
+				}
+			}
+		}
+	}()
+	lolcatCmd.Stdin = ptmx
+	lolcatCmd.Stdout = os.Stdout
+	err = lolcatCmd.Start()
+	if err != nil {
+		handleErr(err)
+		return
+	}
+	err = lolcatCmd.Wait()
+	if err != nil {
+		handleErr(err)
+		return
+	}
+	stop <- true
+}
+
+func pluginShell(shell string) {
+	// Create arbitrary command.
+	c := exec.Command(shell)
+	lolcatCmd := exec.Command("lolcat")
+	// Start the command with a pty.
+	ptmx, err := pty.Start(c)
+	if err != nil {
+		handleErr(err)
+		return
+	}
+	// Make sure to close the pty at the end.
+	defer func() { _ = ptmx.Close() }() // Best effort.
+
+	// Handle pty size.
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGWINCH)
+	go func() {
+		for range ch {
+			if err = pty.InheritSize(os.Stdin, ptmx); err != nil {
+				log.Printf("error resizing pty: %s", err)
+			}
+		}
+	}()
+	ch <- syscall.SIGWINCH // Initial resize.
+
+	// Set stdin in raw mode.
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }() // Best effort.
+	lolcatCmd.Stdin = ptmx
+	lolcatCmd.Stdout = os.Stdout
+	err = lolcatCmd.Start()
+	if err != nil {
+		handleErr(err)
+		return
+	}
+	// Copy stdin to the pty and the pty to stdout.
+	go func() { _, _ = io.Copy(ptmx, os.Stdin) }()
+	//_, _ = io.Copy(os.Stdout, ptmx)
+	err = lolcatCmd.Wait()
+	if err != nil {
+		handleErr(err)
+		return
 	}
 }
 
