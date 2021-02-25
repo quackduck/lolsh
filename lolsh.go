@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -54,52 +55,38 @@ func main() {
 		fmt.Println(helpMsg)
 		return
 	}
-	startShell()
+	startup()
+	repl()
 }
 
-func startShell() {
-	signal.Notify(ctrlCChan, os.Interrupt) // because of this, lolsh itself won't get any signals but will just pass them on to executed commands.
-	go func() {
-		<-ctrlCChan
-		fmt.Println("you hit ^C lol")
-	}()
+func startup() {
+	setupCtrlCWatcher()
 	err := os.Setenv("SHELL", os.Args[0])
 	if err != nil {
 		handleErr(err)
 		return
 	}
-	content, _ := ioutil.ReadFile(configPath + "/startup.lolsh")
-	if os.Getenv("lolsh_disable_lol") == "" || os.Getenv("lolsh_disable_lol") == "false" {
-		parseAndRunCmdStr(string(content), true)
-	} else {
-		parseAndRunCmdStr(string(content), false)
-	}
+	runStartupFile()
 	line = liner.NewLiner()
 	defer line.Close()
 	//line.SetTabCompletionStyle(liner.TabPrints)
-	if err = os.MkdirAll(configPath, 0775); err != nil {
-		handleErr(err)
-		return
-	}
-	histFile, err = os.OpenFile(configPath+"/history.txt", os.O_RDWR|os.O_CREATE, 0664)
-	if err != nil {
-		handleErr(err)
-		return
-	}
+	setHistFile()
 	_, err = line.ReadHistory(histFile)
 	if err != nil {
 		handleErr(err)
 		return
 	}
-	line.SetMultiLineMode(true)
+	//line.SetMultiLineMode(true)
+}
+
+func repl() {
 	defer func() {
-		err = histFile.Close()
+		err := histFile.Close()
 		if err != nil {
 			handleErr(err)
 			return
 		}
 	}()
-
 	for !exit {
 		name, err := os.Hostname()
 		if err != nil {
@@ -118,11 +105,7 @@ func startShell() {
 				continue
 			}
 			line.AppendHistory(commandStr)
-			if os.Getenv("lolsh_disable_lol") == "" || os.Getenv("lolsh_disable_lol") == "false" {
-				parseAndRunCmdStr(commandStr, true)
-			} else {
-				parseAndRunCmdStr(commandStr, false)
-			}
+			parseAndRunCheckLol(commandStr)
 		} else if err == liner.ErrPromptAborted {
 			continue
 		} else {
@@ -229,37 +212,45 @@ func run(command []string, withLol bool) {
 	//_, _ = io.Copy(os.Stdout, ptmx)
 }
 
+func parseAndRunCheckLol(commandStr string) {
+	if os.Getenv("lolsh_disable_lol") == "" || os.Getenv("lolsh_disable_lol") == "false" {
+		parseAndRunCmdStr(commandStr, true)
+	} else {
+		parseAndRunCmdStr(commandStr, false)
+	}
+}
+
 func parseAndRunCmdStr(commandStr string, withLol bool) {
 	commandStr = strings.TrimSpace(commandStr)
-	commandStr = strings.ReplaceAll(commandStr, "\r\n", "\n")
+	commandStr = strings.ReplaceAll(commandStr, "\r\n", "\n") // normalize newlines
 	if commandStr == "" {
 		return
 	}
-	if strings.Contains(commandStr, "\n") {
+	if strings.Contains(commandStr, "\n") { // split lines into separate commands
 		for _, subCommand := range strings.Split(commandStr, "\n") {
 			parseAndRunCmdStr(subCommand, withLol)
 		}
 		return
 	}
-	if strings.Contains(commandStr, ";") {
+	if strings.Contains(commandStr, ";") { // split semicolon-separated strings into separate commands
 		for _, chunkCommand := range strings.Split(commandStr, ";") {
 			parseAndRunCmdStr(chunkCommand, withLol)
 		}
 		return
 	}
-	if strings.Contains(commandStr, "#") {
-		if stuffBefore := commandStr[:strings.Index(commandStr, "#")]; len(stuffBefore) > 1 {
+	if strings.Contains(commandStr, "#") { // remove comments
+		if stuffBefore := commandStr[:strings.Index(commandStr, "#")]; len(stuffBefore) > 0 {
 			parseAndRunCmdStr(stuffBefore, withLol)
 		}
 		return
 	}
 
 	command := strings.Fields(commandStr)
-	for i := range command {
+	for i := range command { // replace env vars with their values
 		if strings.HasPrefix(command[i], "$") { // is env variable?
 			command[i] = os.Getenv(strings.TrimPrefix(command[i], "$"))
 		}
-		command[i] = strings.Replace(command[i], "~", homeDir, 1) // 1 replacement per word
+		command[i] = strings.Replace(command[i], "~", homeDir, 1) // replace tilde with home
 	}
 	run(command, withLol)
 }
@@ -268,6 +259,7 @@ func runCmdInPtyWithLol(cmd *exec.Cmd) {
 	lolcatCmd := exec.Command("lolcat")
 	//	cmd.Stdin = os.Stdin
 	// Start the command with a pty.
+	cmd.Stdin = os.Stdin
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		handleErr(err)
@@ -296,40 +288,6 @@ func runCmdInPtyWithLol(cmd *exec.Cmd) {
 			panic(err)
 		}
 	}()
-	//stop := make(chan bool)
-	//go func() { // copies stdin to the pty until a bool is sent through stop
-	cmd.Stdin = os.Stdin
-	////_, _ = io.Copy(ptmx, os.Stdin)
-	//src := os.Stdin
-	//buf := make([]byte, 1)
-	//dst := ptmx
-	//
-	//for {
-	//	select {
-	//	case <-stop:
-	//		return
-	//	default:
-	//		nr, er := src.Read(buf)
-	//		if nr > 0 {
-	//			nw, ew := dst.Write(buf[0:nr])
-	//			if ew != nil {
-	//				err = ew
-	//				break
-	//			}
-	//			if nr != nw {
-	//				err = io.ErrShortWrite
-	//				break
-	//			}
-	//		}
-	//		if er != nil {
-	//			if er != io.EOF {
-	//				err = er
-	//			}
-	//			break
-	//		}
-	//	}
-	//}
-	//}()
 	lolcatCmd.Stdin = ptmx
 	lolcatCmd.Stdout = os.Stdout
 	err = lolcatCmd.Start()
@@ -343,6 +301,19 @@ func runCmdInPtyWithLol(cmd *exec.Cmd) {
 		return
 	}
 	//stop <- true
+}
+
+func setHistFile() {
+	var err error
+	if err = os.MkdirAll(configPath, 0775); err != nil {
+		handleErr(err)
+		return
+	}
+	histFile, err = os.OpenFile(configPath+"/history.txt", os.O_RDWR|os.O_CREATE, 0664)
+	if err != nil {
+		handleErr(err)
+		return
+	}
 }
 
 func pluginShell(shell string) {
@@ -393,6 +364,19 @@ func pluginShell(shell string) {
 	}
 }
 
+func setupCtrlCWatcher() {
+	signal.Notify(ctrlCChan, os.Interrupt) // because of this, lolsh itself won't get any signals but will just pass them on to executed commands.
+	go func() {
+		<-ctrlCChan
+		fmt.Println("you hit ^C lol")
+	}()
+}
+
+func runStartupFile() {
+	content, _ := ioutil.ReadFile(configPath + "/startup.lolsh")
+	parseAndRunCheckLol(string(content))
+}
+
 func exitJobs() {
 	_, err := line.WriteHistory(histFile)
 	if err != nil {
@@ -416,6 +400,7 @@ func handleErr(err error) {
 
 func handleErrStr(str string) {
 	_, _ = fmt.Fprintln(os.Stderr, color.RedString("error: ")+str)
+	debug.PrintStack()
 }
 
 func cd(path string) {
